@@ -1,0 +1,301 @@
+-- Stored Procedures
+
+-- Create Post
+DELIMITER //
+CREATE PROCEDURE CreatePost(
+    IN p_user_id INTEGER,
+    IN p_caption VARCHAR(200),
+    IN p_location VARCHAR(50),
+    IN p_photo_url VARCHAR(255),
+    IN p_video_url VARCHAR(255),
+    IN p_hashtags VARCHAR(255)
+)
+BEGIN
+    -- Insert into post table
+    INSERT INTO post (user_id, caption, location) VALUES (p_user_id, p_caption, p_location);
+    SET @post_id = LAST_INSERT_ID();
+
+    -- Insert into photos table
+    INSERT INTO photos (photo_url, post_id) VALUES (p_photo_url, @post_id);
+
+    -- Insert into videos table
+    INSERT INTO videos (video_url, post_id) VALUES (p_video_url, @post_id);
+
+    -- Parse and insert hashtags
+    CALL AddHashtagsToPost(p_hashtags, @post_id);
+END //
+DELIMITER ;
+
+-- Add Comment
+DELIMITER //
+CREATE PROCEDURE AddComment(
+    IN p_user_id INTEGER,
+    IN p_post_id INTEGER,
+    IN p_comment_text VARCHAR(255)
+)
+BEGIN
+    -- Insert into comments table
+    INSERT INTO comments (user_id, post_id, comment_text) VALUES (p_user_id, p_post_id, p_comment_text);
+END //
+DELIMITER ;
+
+-- Like Post
+DELIMITER //
+CREATE PROCEDURE LikePost(
+    IN p_user_id INTEGER,
+    IN p_post_id INTEGER
+)
+BEGIN
+    -- Insert into post_likes table
+    INSERT INTO post_likes (user_id, post_id) VALUES (p_user_id, p_post_id);
+END //
+DELIMITER ;
+
+-- Follow User
+DELIMITER //
+CREATE PROCEDURE FollowUser(
+    IN p_follower_id INTEGER,
+    IN p_followee_id INTEGER
+)
+BEGIN
+    -- Insert into follows table
+    INSERT INTO follows (follower_id, followee_id) VALUES (p_follower_id, p_followee_id);
+END //
+DELIMITER ;
+
+-- Bookmark Post
+DELIMITER //
+CREATE PROCEDURE BookmarkPost(
+    IN p_user_id INTEGER,
+    IN p_post_id INTEGER
+)
+BEGIN
+    -- Insert into bookmarks table
+    INSERT INTO bookmarks (user_id, post_id) VALUES (p_user_id, p_post_id);
+END //
+DELIMITER ;
+
+-- Add Hashtag
+DELIMITER //
+CREATE PROCEDURE AddHashtag(
+    IN p_hashtag_name VARCHAR(255)
+)
+BEGIN
+    -- Insert into hashtags table
+    INSERT INTO hashtags (hashtag_name) VALUES (p_hashtag_name);
+END //
+DELIMITER ;
+
+-- Add Hashtags to Post
+DELIMITER //
+CREATE PROCEDURE AddHashtagsToPost(
+    IN p_hashtags VARCHAR(255),
+    IN p_post_id INTEGER
+)
+BEGIN
+    DECLARE tag VARCHAR(255);
+    DECLARE done INT DEFAULT FALSE;
+    DECLARE tag_cursor CURSOR FOR SELECT TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX(p_hashtags, ',', n.digit+1), ',', -1)) AS tag FROM information_schema.columns AS c JOIN (SELECT 0 AS digit UNION SELECT 1 UNION SELECT 2 UNION SELECT 3 UNION SELECT 4) AS n WHERE n.digit < LENGTH(p_hashtags) - LENGTH(REPLACE(p_hashtags, ',', '')) + 1;
+    DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = TRUE;
+
+    OPEN tag_cursor;
+    tag_loop: LOOP
+        FETCH tag_cursor INTO tag;
+        IF done THEN
+            LEAVE tag_loop;
+        END IF;
+
+        -- Insert into hashtags table
+        INSERT INTO hashtags (hashtag_name) VALUES (tag);
+
+        -- Get the hashtag ID
+        SET @hashtag_id = LAST_INSERT_ID();
+
+        -- Insert into post_tags table
+        INSERT INTO post_tags (post_id, hashtag_id) VALUES (p_post_id, @hashtag_id);
+    END LOOP;
+
+    CLOSE tag_cursor;
+END //
+DELIMITER ;
+
+-- Triggers
+
+-- Before Insert on `post` Table
+DELIMITER //
+CREATE TRIGGER BeforeInsertPost
+BEFORE INSERT ON post
+FOR EACH ROW
+BEGIN
+    SET NEW.created_at = IFNULL(NEW.created_at, NOW());
+END //
+DELIMITER ;
+
+-- Before Insert on `comments` Table
+DELIMITER //
+CREATE TRIGGER BeforeInsertComment
+BEFORE INSERT ON comments
+FOR EACH ROW
+BEGIN
+    SET NEW.created_at = IFNULL(NEW.created_at, NOW());
+END //
+DELIMITER ;
+
+-- Before Insert on `post_likes` Table
+DELIMITER //
+CREATE TRIGGER BeforeInsertPostLike
+BEFORE INSERT ON post_likes
+FOR EACH ROW
+BEGIN
+    -- Check if the user already liked the post
+    IF EXISTS (SELECT 1 FROM post_likes WHERE user_id = NEW.user_id AND post_id = NEW.post_id) THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'User already liked the post';
+    END IF;
+END //
+DELIMITER ;
+
+-- Before Insert on `comment_likes` Table
+DELIMITER //
+CREATE TRIGGER BeforeInsertCommentLike
+BEFORE INSERT ON comment_likes
+FOR EACH ROW
+BEGIN
+    -- Check if the user already liked the comment
+    IF EXISTS (SELECT 1 FROM comment_likes WHERE user_id = NEW.user_id AND comment_id = NEW.comment_id) THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'User already liked the comment';
+    END IF;
+END //
+DELIMITER ;
+
+-- Before Insert on `follows` Table
+DELIMITER //
+CREATE TRIGGER BeforeInsertFollow
+BEFORE INSERT ON follows
+FOR EACH ROW
+BEGIN
+    -- Check if the user already follows the followee
+    IF EXISTS (SELECT 1 FROM follows WHERE follower_id = NEW.follower_id AND followee_id = NEW.followee_id) THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'User already follows the followee';
+    END IF;
+END //
+DELIMITER ;
+
+-- Before Insert on `bookmarks` Table
+DELIMITER //
+CREATE TRIGGER BeforeInsertBookmark
+BEFORE INSERT ON bookmarks
+FOR EACH ROW
+BEGIN
+    -- Check if the user already bookmarked the post
+    IF EXISTS (SELECT 1 FROM bookmarks WHERE user_id = NEW.user_id AND post_id = NEW.post_id) THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'User already bookmarked the post';
+    END IF;
+END //
+DELIMITER ;
+
+-- Before Update on `users` Table
+DELIMITER //
+CREATE TRIGGER BeforeUpdateUser
+BEFORE UPDATE ON users
+FOR EACH ROW
+BEGIN
+    -- Check if the email is not updated to a null or empty value
+    IF NEW.email IS NULL OR NEW.email = '' THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'Email cannot be null or empty';
+    END IF;
+END //
+DELIMITER ;
+
+
+
+<---------------------------------------------------------------------------------------------------------------------------------------------------------->
+Editted procedure
+
+USE social_media;
+
+-- Drop existing procedures
+DROP PROCEDURE IF EXISTS CreatePost;
+DROP PROCEDURE IF EXISTS AddHashtagsToPost;
+DROP PROCEDURE IF EXISTS AddHashtag;
+
+-- Create the modified procedures
+DELIMITER //
+
+-- Create Post
+CREATE PROCEDURE CreatePost(
+    IN p_user_id INTEGER,
+    IN p_caption VARCHAR(200),
+    IN p_location VARCHAR(50),
+    IN p_photo_url VARCHAR(255),
+    IN p_video_url VARCHAR(255),
+    IN p_hashtags VARCHAR(255)
+)
+BEGIN
+    -- Insert into post table
+    INSERT INTO post (user_id, caption, location) VALUES (p_user_id, p_caption, p_location);
+    SET @post_id = LAST_INSERT_ID();
+
+    -- Insert into photos table
+    INSERT INTO photos (photo_url, post_id) VALUES (p_photo_url, @post_id);
+
+    -- Insert into videos table
+    INSERT INTO videos (video_url, post_id) VALUES (p_video_url, @post_id);
+
+    -- Parse and insert hashtags
+    CALL AddHashtagsToPost(p_hashtags, @post_id);
+END //
+//
+
+-- Add Hashtags to Post
+CREATE PROCEDURE AddHashtagsToPost(
+    IN p_hashtags VARCHAR(255),
+    IN p_post_id INTEGER
+)
+BEGIN
+    DECLARE tag VARCHAR(255);
+    DECLARE done INT DEFAULT FALSE;
+    DECLARE tag_cursor CURSOR FOR SELECT TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX(p_hashtags, ',', n.digit+1), ',', -1)) AS tag FROM information_schema.columns AS c JOIN (SELECT 0 AS digit UNION SELECT 1 UNION SELECT 2 UNION SELECT 3 UNION SELECT 4) AS n WHERE n.digit < LENGTH(p_hashtags) - LENGTH(REPLACE(p_hashtags, ',', '')) + 1;
+    DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = TRUE;
+
+    OPEN tag_cursor;
+    tag_loop: LOOP
+        FETCH tag_cursor INTO tag;
+        IF done THEN
+            LEAVE tag_loop;
+        END IF;
+
+        -- Insert into hashtags table if the hashtag does not exist
+        IF NOT EXISTS (SELECT 1 FROM hashtags WHERE hashtag_name = tag) THEN
+            INSERT INTO hashtags (hashtag_name) VALUES (tag);
+        END IF;
+
+        -- Get the hashtag ID
+        SET @hashtag_id = (SELECT hashtag_id FROM hashtags WHERE hashtag_name = tag);
+
+        -- Insert into post_tags table
+        INSERT INTO post_tags (post_id, hashtag_id) VALUES (p_post_id, @hashtag_id);
+    END LOOP;
+
+    CLOSE tag_cursor;
+END //
+//
+
+-- Add Hashtag
+CREATE PROCEDURE AddHashtag(
+    IN p_hashtag_name VARCHAR(255)
+)
+BEGIN
+    -- Insert into hashtags table if the hashtag does not exist
+    IF NOT EXISTS (SELECT 1 FROM hashtags WHERE hashtag_name = p_hashtag_name) THEN
+        INSERT INTO hashtags (hashtag_name) VALUES (p_hashtag_name);
+    END IF;
+END //
+//
+
+DELIMITER ;
+
